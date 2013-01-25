@@ -225,9 +225,20 @@ produce_body(RD, #key_context{get_fsm_pid=GetFsmPid,
             dt_return_object(<<"get_acl">>, [-2], [UserName, BFile_str]),
             {riak_cs_acl_utils:acl_to_xml(Acl), RD, KeyCtx}
     end;
-produce_body(RD, #key_context{get_fsm_pid=GetFsmPid, manifest=Mfst,
-                              context=#context{start_time=StartTime,
-                                               user=User}}=Ctx) ->
+produce_body(RD, Ctx) ->
+    case wrq:get_req_header("range", RD) of
+        undefined ->
+            produce_body_no_range(RD, Ctx);
+        RawRange ->
+            %% TODO: Should use webmachine's parse logic (exported?)
+            %% TODO: Now only treat single range, what to do for multiple ranges?
+            [Range] = mochiweb_http:parse_range_request(RawRange),
+            produce_body_range(RD, Ctx, Range)
+    end.
+
+produce_body_no_range(RD, #key_context{get_fsm_pid=GetFsmPid, manifest=Mfst,
+                                       context=#context{start_time=StartTime,
+                                                        user=User}}=Ctx) ->
     {Bucket, File} = Mfst?MANIFEST.bkey,
     BFile_str = [Bucket, $,, File],
     UserName = extract_name(User),
@@ -263,6 +274,78 @@ produce_body(RD, #key_context{get_fsm_pid=GetFsmPid, manifest=Mfst,
     end,
     dt_return(<<"produce_body">>, [ContentLength], [UserName, BFile_str]),
     {{known_length_stream, ContentLength, {<<>>, StreamFun}}, NewRQ, Ctx}.
+
+produce_body_range(RD, #key_context{get_fsm_pid=GetFsmPid, manifest=Mfst,
+                                    context=#context{start_time=StartTime,
+                                                     user=User}}=Ctx,
+                   Range) ->
+
+    {Bucket, File} = Mfst?MANIFEST.bkey,
+    BFile_str = [Bucket, $,, File],
+    UserName = extract_name(User),
+    dt_entry(<<"produce_body">>, [], [UserName, BFile_str]),
+    dt_entry_object(<<"file_get">>, [], [UserName, BFile_str]),
+    ResourceLength = Mfst?MANIFEST.content_length,
+    {_Skip, ContentLength} = range_skip_length(Range, ResourceLength),
+    ContentMd5 = Mfst?MANIFEST.content_md5,
+    LastModified = riak_cs_wm_utils:to_rfc_1123(Mfst?MANIFEST.created),
+    ETag = "\"" ++ riak_cs_utils:binary_to_hexlist(ContentMd5) ++ "\"",
+    NewRQ = lists:foldl(fun({K, V}, Rq) -> wrq:set_resp_header(K, V, Rq) end,
+                        RD,
+                        [{"ETag",  ETag},
+                         {"Last-Modified", LastModified}
+                        ] ++  Mfst?MANIFEST.metadata),
+    Method = wrq:method(RD),
+    ResponseBody =
+        case Method == 'HEAD'
+            orelse
+            ContentLength == 0 of
+            true ->
+                riak_cs_get_fsm:stop(GetFsmPid),
+                <<>>;
+            false ->
+                riak_cs_get_fsm:continue(GetFsmPid),
+                %% TODO: Collect all blocks before start responding, SLOW for large range
+                get_range_blocks(GetFsmPid, StartTime, UserName, BFile_str, [])
+        end,
+    if Method == 'HEAD' ->
+            dt_return_object(<<"file_head">>, [], [UserName, BFile_str]),
+            ok = riak_cs_stats:update_with_start(object_head, StartTime);
+       true ->
+            ok
+    end,
+    dt_return(<<"produce_body">>, [ContentLength], [UserName, BFile_str]),
+    %% {{stream, ContentLength, fun(_, _) -> ResponseBody end}, NewRQ, Ctx}.
+    {{stream, ContentLength, fun(_, _) -> {ResponseBody, done} end}, NewRQ, Ctx}.
+    %% {ResponseBody, NewRQ, Ctx}.
+
+%% TODO: Copied form webmachine_request:range_skip_length/2
+range_skip_length(Spec, Size) ->
+    case Spec of
+        {none, R} when R =< Size, R >= 0 ->
+            {Size - R, R};
+        {none, _OutOfRange} ->
+            {0, Size};
+        {R, none} when R >= 0, R < Size ->
+            {R, Size - R};
+        {_OutOfRange, none} ->
+            invalid_range;
+        {Start, End} when 0 =< Start, Start =< End, End < Size ->
+            {Start, End - Start + 1};
+        {_OutOfRange, _End} ->
+            invalid_range
+    end.
+
+get_range_blocks(FsmPid, StartTime, UserName, BFile_str, Acc) ->
+    case riak_cs_get_fsm:get_next_chunk(FsmPid) of
+        {done, Chunk} ->
+            ok = riak_cs_stats:update_with_start(object_get, StartTime),
+            riak_cs_wm_key:dt_return_object(<<"file_get">>, [],
+                                              [UserName, BFile_str]),
+            lists:append(lists:reverse([Chunk | Acc]));
+        {chunk, Chunk} ->
+            get_range_blocks(FsmPid, StartTime, UserName, BFile_str, [Chunk | Acc])
+    end.
 
 %% @doc Callback for deleting an object.
 -spec delete_resource(term(), term()) -> {true, term(), #key_context{}}.
