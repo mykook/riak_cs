@@ -261,7 +261,7 @@ produce_body_no_range(RD, #key_context{get_fsm_pid=GetFsmPid, manifest=Mfst,
             riak_cs_get_fsm:stop(GetFsmPid),
             StreamFun = fun() -> {<<>>, done} end;
         false ->
-            riak_cs_get_fsm:continue(GetFsmPid),
+            riak_cs_get_fsm:continue(GetFsmPid, {0, ContentLength - 1}),
             StreamFun = fun() -> riak_cs_wm_utils:streaming_get(
                                    GetFsmPid, StartTime, UserName, BFile_str)
                         end
@@ -286,7 +286,7 @@ produce_body_range(RD, #key_context{get_fsm_pid=GetFsmPid, manifest=Mfst,
     dt_entry(<<"produce_body">>, [], [UserName, BFile_str]),
     dt_entry_object(<<"file_get">>, [], [UserName, BFile_str]),
     ResourceLength = Mfst?MANIFEST.content_length,
-    {_Skip, ContentLength} = range_skip_length(Range, ResourceLength),
+    {Skip, ContentLength} = range_skip_length(Range, ResourceLength),
     ContentMd5 = Mfst?MANIFEST.content_md5,
     LastModified = riak_cs_wm_utils:to_rfc_1123(Mfst?MANIFEST.created),
     ETag = "\"" ++ riak_cs_utils:binary_to_hexlist(ContentMd5) ++ "\"",
@@ -304,7 +304,7 @@ produce_body_range(RD, #key_context{get_fsm_pid=GetFsmPid, manifest=Mfst,
                 riak_cs_get_fsm:stop(GetFsmPid),
                 <<>>;
             false ->
-                riak_cs_get_fsm:continue(GetFsmPid),
+                riak_cs_get_fsm:continue(GetFsmPid, {Skip, Skip + ContentLength - 1}),
                 %% TODO: Collect all blocks before start responding, SLOW for large range
                 get_range_blocks(GetFsmPid, StartTime, UserName, BFile_str, [])
         end,
@@ -315,9 +315,7 @@ produce_body_range(RD, #key_context{get_fsm_pid=GetFsmPid, manifest=Mfst,
             ok
     end,
     dt_return(<<"produce_body">>, [ContentLength], [UserName, BFile_str]),
-    %% {{stream, ContentLength, fun(_, _) -> ResponseBody end}, NewRQ, Ctx}.
-    {{stream, ContentLength, fun(_, _) -> {ResponseBody, done} end}, NewRQ, Ctx}.
-    %% {ResponseBody, NewRQ, Ctx}.
+    {{stream, ResourceLength, fun(_, _) -> {ResponseBody, done} end}, NewRQ, Ctx}.
 
 %% TODO: Copied form webmachine_request:range_skip_length/2
 range_skip_length(Spec, Size) ->
@@ -342,7 +340,7 @@ get_range_blocks(FsmPid, StartTime, UserName, BFile_str, Acc) ->
             ok = riak_cs_stats:update_with_start(object_get, StartTime),
             riak_cs_wm_key:dt_return_object(<<"file_get">>, [],
                                               [UserName, BFile_str]),
-            lists:append(lists:reverse([Chunk | Acc]));
+            lists:reverse([Chunk | Acc]);
         {chunk, Chunk} ->
             get_range_blocks(FsmPid, StartTime, UserName, BFile_str, [Chunk | Acc])
     end.

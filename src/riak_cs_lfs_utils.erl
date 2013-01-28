@@ -21,6 +21,7 @@
          safe_block_size_from_manifest/1,
          initial_blocks/2,
          block_sequences_for_manifest/1,
+         block_sequences_for_manifest/2,
          new_manifest/9,
          new_manifest/11,
          remove_write_block/2,
@@ -96,6 +97,16 @@ initial_blocks(ContentLength, BlockSize) ->
 block_sequences_for_manifest(?MANIFEST{content_length=ContentLength}=Manifest) ->
     SafeBlockSize = safe_block_size_from_manifest(Manifest),
     initial_blocks(ContentLength, SafeBlockSize).
+
+block_sequences_for_manifest(Manifest, {Start, End}) ->
+    SafeBlockSize = safe_block_size_from_manifest(Manifest),
+    SkipInitial = Start rem SafeBlockSize,
+    KeepFinal = (End rem SafeBlockSize) + 1,
+    lager:debug("InitialBlock: ~p, FinalBlock: ~p~n",
+                [Start div SafeBlockSize, End div SafeBlockSize]),
+    lager:debug("SkipInitial: ~p, KeepFinal: ~p~n", [SkipInitial, KeepFinal]),
+    {lists:seq(Start div SafeBlockSize, End div SafeBlockSize),
+     SkipInitial, KeepFinal}.
 
 %% @doc Return the configured file block fetch concurrency .
 -spec fetch_concurrency() -> pos_integer().
