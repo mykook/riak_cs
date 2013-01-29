@@ -230,10 +230,31 @@ produce_body(RD, Ctx) ->
         undefined ->
             produce_body_no_range(RD, Ctx);
         RawRange ->
-            %% TODO: Should use webmachine's parse logic (exported?)
-            %% TODO: Now only treat single range, what to do for multiple ranges?
-            [Range] = mochiweb_http:parse_range_request(RawRange),
+            %% TODO: Now only treat single range
+            %% should respond whole resouce for multiple ranges
+            [Range] = parse_range_request(RawRange),
             produce_body_range(RD, Ctx, Range)
+    end.
+
+%% TODO: Copied from webmachine_request:parse_range_request
+parse_range_request(RawRange) when is_list(RawRange) ->
+    try
+        "bytes=" ++ RangeString = RawRange,
+        Ranges = string:tokens(RangeString, ","),
+        lists:map(fun ("-" ++ V)  ->
+                          {none, list_to_integer(V)};
+                      (R) ->
+                          case string:tokens(R, "-") of
+                              [S1, S2] ->
+                                  {list_to_integer(S1), list_to_integer(S2)};
+                              [S] ->
+                                  {list_to_integer(S), none}
+                          end
+                  end,
+                  Ranges)
+    catch
+        _:_ ->
+            fail
     end.
 
 produce_body_no_range(RD, #key_context{get_fsm_pid=GetFsmPid, manifest=Mfst,
