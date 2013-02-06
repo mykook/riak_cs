@@ -49,20 +49,22 @@
 %% Public API
 %% ===================================================================
 
--spec eval(access(), policy() | undefined | binary() )-> boolean().
+-spec eval(access(), policy() | undefined | binary() )
+	  -> boolean() | undefined | {error, term()}.
 eval(_, undefined) -> undefined;
 eval(Access, JSON) when is_binary(JSON) ->
     case policy_from_json(JSON) of
-        {ok, Policy} ->  eval(Access, Policy);
+        {ok, Policy} -> eval(Access, Policy);
         E -> E
     end;
 eval(Access, ?POLICY{version=V, statement=Stmts}) ->
     case V of
-        undefined ->        aggregate_evaluation(Access, Stmts);
+        undefined ->            aggregate_evaluation(Access, Stmts);
         ?AMZ_DEFAULT_VERSION -> aggregate_evaluation(Access, Stmts);
         _ -> false
     end.
 
+-spec aggregate_evaluation(access(), list(#statement{})) -> undefined | boolean().
 aggregate_evaluation(_, []) -> undefined;
 aggregate_evaluation(Access, [Stmt|Stmts]) ->
     case eval_statement(Access, Stmt) of
@@ -92,6 +94,7 @@ check_policy(#access_v1{bucket=B} = _Access,
 
 % @doc confirm if forbidden action included in policy
 % s3:CreateBucket and s3:ListAllMyBuckets are prohibited at S3
+-spec check_actions(list(#statement{})) -> boolean().
 check_actions([]) -> true;
 check_actions([Stmt|Stmts]) ->
     case Stmt#statement.action of
@@ -126,6 +129,7 @@ check_principal([_|T]) ->
     check_principal(T).
 
 % @doc check if the policy is set to proper bucket by checking arn
+-spec check_all_resources(binary(), policy()) -> boolean().
 check_all_resources(BucketBin, ?POLICY{statement=Stmts} = _Policy) ->
     CheckFun = fun(Stmt) ->
                        check_all_resources(BucketBin, Stmt)
@@ -229,7 +233,7 @@ resource_matches(BucketBin, KeyBin, #statement{resource=Resources}) ->
 
 
 % functions to eval:
--spec eval_statement(access(), policy()) -> boolean() | undefined.
+-spec eval_statement(access(), #statement{}) -> boolean() | undefined.
 eval_statement(#access_v1{method=M, target=T, req=Req, bucket=B, key=K} = _Access,
                #statement{effect=E, condition_block=Conds, action=As} = Stmt) ->
     {ok, A} = make_action(M, T),

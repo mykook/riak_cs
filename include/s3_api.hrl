@@ -89,7 +89,8 @@
          }).
 
 -record(policy_v1, {
-          version = <<"2008-10-17">> :: binary(),  % no other value is allowed than default
+          %% no other value is allowed than default for version
+          version = <<"2008-10-17">> :: binary() | undefined,
           id = undefined :: binary(),  % had better use uuid: should be UNIQUE
           statement = [] :: #statement{}
          }).

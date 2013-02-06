@@ -222,8 +222,10 @@ handle_cast(_Msg, State) ->
 
 delete_block(RiakcPid, ReplyPid, RiakObject, BlockNumber) ->
     Result = constrained_delete(RiakcPid, RiakObject, BlockNumber),
-    secondary_delete_check(Result, RiakcPid, RiakObject),
-    riak_cs_delete_fsm:block_deleted(ReplyPid, Result),
+    %% kota: what if secondary_delete_check/3 returns {error, _} ?
+    %% dialyzer says it returns {error, _}
+    _ = secondary_delete_check(Result, RiakcPid, RiakObject),
+    _ = riak_cs_delete_fsm:block_deleted(ReplyPid, Result),
     ok.
 
 constrained_delete(RiakcPid, RiakObject, BlockNumber) ->

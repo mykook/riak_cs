@@ -12,6 +12,7 @@
          start_link/1,
          stop/1]).
 
+-spec riak_host_port() -> {string(), inet:port_number()}.
 riak_host_port() ->
     case application:get_env(riak_cs, riak_ip) of
         {ok, Host} ->

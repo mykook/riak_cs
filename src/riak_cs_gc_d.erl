@@ -450,6 +450,7 @@ cancel_timer(infinity, TimerRef) ->
 cancel_timer(_, TimerRef) ->
     handle_cancel_timer(erlang:cancel_timer(TimerRef)).
 
+-spec handle_cancel_timer(false|non_neg_integer()) -> non_neg_integer().
 handle_cancel_timer(false) ->
     0;
 handle_cancel_timer(RemainderMillis) ->

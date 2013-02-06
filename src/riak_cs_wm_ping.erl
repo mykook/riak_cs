@@ -29,30 +29,28 @@ init(_Config) ->
 -spec service_available(term(), term()) -> {boolean(), term(), term()}.
 service_available(RD, Ctx) ->
     riak_cs_dtrace:dt_wm_entry(?MODULE, <<"service_available">>),
-    case poolboy:checkout(request_pool, true, ping_timeout()) of
-        full ->
-            case riak_cs_riakc_pool_worker:start_link([]) of
-                {ok, Pid} ->
-                    UpdCtx = Ctx#ping_context{riakc_pid=Pid,
-                                              pool_pid=false};
-                {error, _} ->
-                    Pid = undefined,
-                    UpdCtx = Ctx
-            end;
-        Pid ->
-            UpdCtx = Ctx#ping_context{riakc_pid=Pid}
-    end,
-    case Pid of
-        undefined ->
-            Available = false;
-        _ ->
-            case riakc_pb_socket:ping(Pid, ping_timeout()) of
-                pong ->
-                    Available = true;
-                 _ ->
-                    Available = false
-            end
-    end,
+    {Pid, UpdCtx} =
+	case poolboy:checkout(request_pool, true, ping_timeout()) of
+	    full ->
+		case riak_cs_riakc_pool_worker:start_link([]) of
+		    {ok, Pid0} ->
+			{Pid0, Ctx#ping_context{riakc_pid=Pid0,
+						pool_pid=false}};
+		    {error, _} ->
+			{undefined, Ctx}
+		end;
+	    Pid0 ->
+		{Pid0, Ctx#ping_context{riakc_pid=Pid0}}
+	end,
+    Available =
+	case Pid of
+	    undefined -> false;
+	    _ ->
+		case riakc_pb_socket:ping(Pid, ping_timeout()) of
+		    pong -> true;
+		    _ ->    false
+		end
+	end,
     {Available, RD, UpdCtx}.
 
 -spec allowed_methods(term(), term()) -> {[atom()], term(), term()}.
