@@ -20,11 +20,11 @@
 
 %%
 %% Please note that the in order
-%% to run basho_bench_driver_moss
+%% to run basho_bench_driver_cs
 %% `auth_bypass` must be set to true
-%% on the riak_moss app.config
+%% on the riak_cs app.config
 
--module(basho_bench_driver_moss).
+-module(basho_bench_driver_cs).
 
 -define(BLOCK, (1024*1024)).
 -define(VERYLONG_TIMEOUT, (300*1000)).
@@ -55,7 +55,7 @@ new(ID) ->
     %% For large numbers of load generators, it's a good idea to
     %% stagger things out a little bit to avoid thundering herd
     %% problems at the server side.
-    timer:sleep(basho_bench_config:get(moss_new_delay, 10) * (ID - 1)),
+    timer:sleep(basho_bench_config:get(cs_new_delay, 10) * (ID - 1)),
 
     application:start(ibrowse),
     application:start(crypto),
@@ -65,16 +65,16 @@ new(ID) ->
     %% TODO:
     %% We'll start with a single
     %% IP for now
-    Ip  = basho_bench_config:get(moss_raw_ip, "127.0.0.1"),
-    Port = basho_bench_config:get(moss_raw_port, 8080),
-    Disconnect = basho_bench_config:get(moss_disconnect_frequency, infinity),
+    Ip  = basho_bench_config:get(cs_raw_ip, "127.0.0.1"),
+    Port = basho_bench_config:get(cs_raw_port, 8080),
+    Disconnect = basho_bench_config:get(cs_disconnect_frequency, infinity),
     erlang:put(disconnect_freq, Disconnect),
 
     %% Get our measurement units: op/sec, Byte/sec, KByte/sec, MByte/sec
     {RF_name, ReportFun} =
         %% We need to be really careful with these custom units things.
         %% Use floats for everything.
-        case (catch basho_bench_config:get(moss_measurement_units)) of
+        case (catch basho_bench_config:get(cs_measurement_units)) of
             N = byte_sec  -> {N,      fun(X) -> X / 1 end};
             N = kbyte_sec -> {N,      fun(X) -> X / 1024 end};
             N = mbyte_sec -> {N,      fun(X) -> X / (1024 * 1024) end};
@@ -105,23 +105,23 @@ new(ID) ->
     end,
 
     Hosts = [{Ip, Port}],
-    ProxyHosts  = case basho_bench_config:get(moss_http_proxy_host,
+    ProxyHosts  = case basho_bench_config:get(cs_http_proxy_host,
                                               ["127.0.0.1"]) of
                       [C|_] = String when is_integer(C), C < 256 ->
                           [String];
-                      T = Tuple when is_tuple(T) ->
+                      T when is_tuple(T) ->
                           [T];
                       Else ->
                           Else
                   end,
-    ProxyPort = basho_bench_config:get(moss_http_proxy_port, 8080),
+    ProxyPort = basho_bench_config:get(cs_http_proxy_port, 8080),
     ProxyTargets = basho_bench_config:normalize_ips(ProxyHosts, ProxyPort),
     {ProxyH, ProxyP} = lists:nth((ID rem length(ProxyTargets)+1), ProxyTargets),
     lager:log(info, self(), "ID ~p Proxy host ~p TCP port ~p\n",
               [ID, ProxyH, ProxyP]),
 
     {ok, #state{client_id=ID, hosts=Hosts,
-                bucket = basho_bench_config:get(moss_bucket, "test"),
+                bucket = basho_bench_config:get(cs_bucket, "test"),
                 report_fun = ReportFun,
                 http_proxy_host = ProxyH, http_proxy_port = ProxyP}}.
 
@@ -272,7 +272,7 @@ insert(KeyGen, ValueGen, {Host, Port}, Bucket, State) ->
                   error, self(),
                   "This driver cannot use the standard basho_bench "
                   "generator functions, please see refer to "
-                  "'moss.config.sample' file for an example.\n", []),
+                  "'riak-cs.config.sample' file for an example.\n", []),
                 exit(bad_generator)
         end,
     do_put({Host, Port}, Url, [{"content-length", integer_to_list(CL)}], ValueT,
@@ -512,9 +512,9 @@ initiate_request(Host, Url, Headers0, Method, Body, Options) ->
     Uri = element(7, Url),
     Sig = stanchion_auth:request_signature(
             uppercase_verb(Method), Headers, Uri,
-            basho_bench_config:get(moss_secret_key)),
-    AuthStr = ["AWS ", basho_bench_config:get(moss_access_key), ":", Sig],
+            basho_bench_config:get(cs_secret_key)),
+    AuthStr = ["AWS ", basho_bench_config:get(cs_access_key), ":", Sig],
     HeadersWithAuth = [{'Authorization', AuthStr}|Headers],
-    Timeout = basho_bench_config:get(moss_request_timeout, 5000),
+    Timeout = basho_bench_config:get(cs_request_timeout, 5000),
     ibrowse_http_client:send_req(Pid, Url, HeadersWithAuth, Method,
                                  Body, Options, Timeout).
