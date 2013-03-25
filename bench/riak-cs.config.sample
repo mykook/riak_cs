@@ -41,7 +41,7 @@
 %% explanation of the proplist below.
 {value_generator, {function, basho_bench_driver_cs, bigfile_valgen,
                   [[{file_size, 8001001},
-                    {ibrowse_block_size, 1000000},
+                    {ibrowse_chunk_size, 1000000},
                     {max_rate_per_chunk, 50}]]}}.
 
 %% NOTE: It's not a good idea to mix insert & get ops in a single
