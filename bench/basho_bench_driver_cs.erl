@@ -209,7 +209,7 @@ run2(Op, _KeyGen, _ValueGen, State) ->
 
 bigfile_valgen(Id, Props) ->
     if Id == 1 ->
-            lager:log(info, "~p value gen props: ~p\n", [?MODULE, Props]);
+            lager:log(info, self(), "~p value gen props: ~p\n", [?MODULE, Props]);
        true ->
             ok
     end,
