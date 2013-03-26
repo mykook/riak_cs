@@ -55,23 +55,16 @@ setup(NumNodes, Configs) ->
     application:set_env(sasl, sasl_error_logger, false),
 
     Cfgs = configs(Configs),
-    {{AdminKeyId, AdminSecretKey},
-     {RiakNodes, _CSNodes, _Stanchion}=Nodes} = build_cluster(NumNodes, Cfgs),
-
-    AdminConfig = rtcs:config(AdminKeyId,
+     {RiakNodes, _CSNodes, _Stanchion} = Nodes = deploy_nodes(NumNodes, Cfgs),
+    rt:wait_until_nodes_ready(RiakNodes),
+    lager:info("Make cluster"),
+    rtcs:make_cluster(RiakNodes),
+    rt:wait_until_ring_converged(RiakNodes),
+     {AdminKeyId, AdminSecretKey} = setup_admin_user(NumNodes, Cfgs),
+     AdminConfig = rtcs:config(AdminKeyId,
                               AdminSecretKey,
                               rtcs:cs_port(hd(RiakNodes))),
     {AdminConfig, Nodes}.
-
-build_cluster(NumNodes, Configs) ->
-    {_, {RiakNodes, _, _}} = Nodes =
-        deploy_nodes(NumNodes, Configs),
-
-    rt:wait_until_nodes_ready(RiakNodes),
-    lager:info("Build cluster"),
-    rtcs:make_cluster(RiakNodes),
-    rt:wait_until_ring_converged(RiakNodes),
-    Nodes.
 
 configs(CustomConfigs) ->
     [{riak, proplists:get_value(riak, CustomConfigs, ee_config())},
@@ -250,6 +243,35 @@ deploy_nodes(NumNodes, InitialConfig) ->
 
     rt:wait_until_nodes_ready(RiakNodes),
 
+    Nodes.
+
+
+setup_admin_user(NumNodes, InitialConfig) ->
+    lager:info("Initial Config: ~p", [InitialConfig]),
+    NodeConfig = [{current, InitialConfig} || _ <- lists:seq(1,NumNodes)],
+    RiakNodes = [?DEV(N) || N <- lists:seq(1, NumNodes)],
+    CSNodes = [?CSDEV(N) || N <- lists:seq(1, NumNodes)],
+    StanchionNode = 'stanchion@127.0.0.1',
+
+    lager:info("RiakNodes: ~p", [RiakNodes]),
+
+    NodeMap = orddict:from_list(lists:zip(RiakNodes, lists:seq(1, NumNodes))),
+    rt:set_config(rt_nodes, NodeMap),
+
+    VersionMap = lists:zip(lists:seq(1, NumNodes), lists:duplicate(NumNodes, ee_current)),
+    rt:set_config(rt_versions, VersionMap),
+
+    lager:info("VersionMap: ~p", [VersionMap]),
+
+    NL0 = lists:zip(CSNodes, RiakNodes),
+    {CS1, R1} = hd(NL0),
+    NodeList = [{CS1, R1, StanchionNode} | tl(NL0)],
+    lager:info("NodeList: ~p", [NodeList]),
+
+    {_Versions, Configs} = lists:unzip(NodeConfig),
+
+    Nodes = {RiakNodes, CSNodes, StanchionNode},
+
     %% Create admin user and set in cs and stanchion configs
     AdminCreds = create_admin_user(hd(RiakNodes)),
 
@@ -262,7 +284,8 @@ deploy_nodes(NumNodes, InitialConfig) ->
     [ok = rt:wait_until_pingable(N) || N <- CSNodes ++ [StanchionNode]],
 
     lager:info("Deployed nodes: ~p", [Nodes]),
-    {AdminCreds, Nodes}.
+    AdminCreds.
+
 
 start_cs_and_stanchion_nodes(NodeList) ->
     rt:pmap(fun({_CSNode, RiakNode, _Stanchion}) ->
