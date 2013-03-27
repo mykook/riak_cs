@@ -3,31 +3,15 @@
 -export([confirm/0]).
 -include_lib("eunit/include/eunit.hrl").
 
--define(TEST_BUCKET, "riak_test_bucket").
+-define(TEST_BUCKET, "riak-test-bucket").
 
 confirm() ->
-    {RiakNodes, _CSNodes, _Stanchion} =
-        rtcs:deploy_nodes(4, [{riak, rtcs:ee_config()},
-                              {stanchion, rtcs:stanchion_config()},
-                              {cs, rtcs:cs_config()}]),
+    {UserConfig, {RiakNodes, _CSNodes, _Stanchion}} = rtcs:setup2x2(),
+    lager:info("UserConfig = ~p", [UserConfig]),
+    [A,B,C,D] = RiakNodes,
 
-    rt:wait_until_nodes_ready(RiakNodes),
-
-    {ANodes, BNodes} = lists:split(2, RiakNodes),
-
-    lager:info("Build cluster A"),
-    rtcs:make_cluster(ANodes),
-
-    lager:info("Build cluster B"),
-    rtcs:make_cluster(BNodes),
-
-    rt:wait_until_ring_converged(ANodes),
-    rt:wait_until_ring_converged(BNodes),
-
-    %% STFU sasl
-    application:load(sasl),
-    application:set_env(sasl, sasl_error_logger, false),
-    erlcloud:start(),
+    ANodes = [A,B],
+    BNodes = [C,D],
 
     AFirst = hd(ANodes),
     BFirst = hd(BNodes),
@@ -82,26 +66,51 @@ confirm() ->
 
 
     %% get the leader for the first cluster
-    repl_helper:wait_until_leader(AFirst),
     LeaderA = rpc:call(AFirst, riak_core_cluster_mgr, get_leader, []),
 
+    lager:info("Name cluster A"),
     repl_helpers:name_cluster(AFirst, "A"),
+
+    lager:info("Name cluster B"),
     repl_helpers:name_cluster(BFirst, "B"),
 
+    rt:wait_until_ring_converged(ANodes),
+    rt:wait_until_ring_converged(BNodes),
+
+    lager:info("waiting for leader to converge on cluster A"),
+    ?assertEqual(ok, repl_util:wait_until_leader_converge(ANodes)),
+    lager:info("waiting for leader to converge on cluster B"),
+    ?assertEqual(ok, repl_util:wait_until_leader_converge(BNodes)),
+
+    %% get the leader for the first cluster
+    LeaderA = rpc:call(AFirst, riak_core_cluster_mgr, get_leader, []),
+
     {ok, {_IP, BPort}} = rpc:call(BFirst, application, get_env,
-                                  [riak_core, cluster_mgr]),
-    repl_helper:connect_cluster(LeaderA, "127.0.0.1", BPort),
-    ?assertEqual(ok, repl_helper:wait_for_connection(LeaderA, "B")),
+                                 [riak_core, cluster_mgr]),
+    connect_cluster(LeaderA, "127.0.0.1", BPort),
+
+    ?assertEqual(ok, wait_for_connection(LeaderA, "B")),
+    repl_util:enable_realtime(LeaderA, "B"),
+    rt:wait_until_ring_converged(ANodes),
+    repl_util:start_realtime(LeaderA, "B"),
+    rt:wait_until_ring_converged(ANodes),
+    repl_util:enable_fullsync(LeaderA, "B"),
     rt:wait_until_ring_converged(ANodes),
 
-    %%% BNW END
-    %%% BNW END
-    %%% BNW END
+    enable_pg(LeaderA, "B"),
+    rt:wait_until_ring_converged(ANodes),
 
+    Status = rpc:call(LeaderA, riak_repl_console, status, [quiet]),
 
+    case proplists:get_value(proxy_get_enabled, Status) of
+        undefined -> lager:info("PG NOT ENABLED FOR CLUSTER");
+        EnabledFor -> lager:info("PG enabled for cluster ~p",[EnabledFor])
+    end,
 
-    repl_helpers:start_and_wait_until_fullsync_complete(LeaderA),
+    rt:wait_until_ring_converged(ANodes),
 
+    lager:info("Starting fullsync"),
+    start_and_wait_until_fullsync_complete13(LeaderA),
     lager:info("User 2 is valid on secondary cluster after fullsync,"
                " still no buckets"),
     ?assertEqual([{buckets, []}], erlcloud_s3:list_buckets(U2C2Config)),
@@ -126,8 +135,8 @@ confirm() ->
     erlcloud_s3:put_object(?TEST_BUCKET, "object_three", Object3, U1C1Config),
 
     lager:info("disconnect the clusters"),
-    repl_helpers:disconnect_cluster(LeaderA, "B"),
-    ?assertEqual(ok, repl_helper:wait_until_no_connection(LeaderA, "B")),
+    disconnect_cluster(LeaderA, "B"),
+    ?assertEqual(ok, wait_until_no_connection(LeaderA)),
     rt:wait_until_ring_converged(ANodes),
 
     timer:sleep(5000),
@@ -166,17 +175,19 @@ confirm() ->
         proplists:get_value(content_length, Obj5)),
 
     lager:info("reconnect clusters"),
-    repl_helper:connect_cluster(LeaderA, "127.0.0.1", BPort),
-    ?assertEqual(ok, repl_helper:wait_for_connection(LeaderA, "B")),
+    connect_cluster(LeaderA, "127.0.0.1", BPort),
+    ?assertEqual(ok, wait_for_connection(LeaderA, "B")),
     rt:wait_until_ring_converged(ANodes),
 
+
+    lager:info("CONFIG ~p", [U1C2Config]),
     lager:info("check we can read object_two via proxy get"),
     Obj6 = erlcloud_s3:get_object(?TEST_BUCKET, "object_two", U1C2Config),
     ?assertEqual(Object2, proplists:get_value(content, Obj6)),
 
     lager:info("disconnect the clusters again"),
-    repl_helpers:disconnect_cluster(LeaderA, "B"),
-    ?assertEqual(ok, repl_helper:wait_until_no_connection(LeaderA, "B")),
+    disconnect_cluster(LeaderA, "B"),
+    ?assertEqual(ok, wait_until_no_connection(LeaderA)),
     rt:wait_until_ring_converged(ANodes),
 
     lager:info("check we still can't read object_three"),
@@ -192,8 +203,8 @@ confirm() ->
     erlcloud_s3:delete_object(?TEST_BUCKET, "object_one", U1C1Config),
 
     lager:info("reconnect clusters"),
-    repl_helper:connect_cluster(LeaderA, "127.0.0.1", BPort),
-    ?assertEqual(ok, repl_helper:wait_for_connection(LeaderA, "B")),
+    connect_cluster(LeaderA, "127.0.0.1", BPort),
+    ?assertEqual(ok, wait_for_connection(LeaderA, "B")),
     rt:wait_until_ring_converged(ANodes),
 
 
@@ -208,15 +219,15 @@ confirm() ->
     ?assertError({aws_error, _},
                  erlcloud_s3:get_object(?TEST_BUCKET, "object_two", U1C2Config)),
 
-    repl_helpers:start_and_wait_until_fullsync_complete(LeaderA),
+    start_and_wait_until_fullsync_complete13(LeaderA),
 
     lager:info("object_one is deleted after fullsync"),
     ?assertError({aws_error, _},
                  erlcloud_s3:get_object(?TEST_BUCKET, "object_one", U1C2Config)),
 
     lager:info("disconnect the clusters again"),
-    repl_helpers:disconnect_cluster(LeaderA, "B"),
-    ?assertEqual(ok, repl_helper:wait_until_no_connection(LeaderA, "B")),
+    disconnect_cluster(LeaderA, "B"),
+    ?assertEqual(ok, wait_until_no_connection(LeaderA)),
     rt:wait_until_ring_converged(ANodes),
 
     Object3A = crypto:rand_bytes(4194304),
@@ -245,8 +256,8 @@ confirm() ->
     erlcloud_s3:put_object(?TEST_BUCKET, "object_five", Object5A, U1C1Config),
 
     lager:info("reconnect clusters"),
-    repl_helper:connect_cluster(LeaderA, "127.0.0.1", BPort),
-    ?assertEqual(ok, repl_helper:wait_for_connection(LeaderA, "B")),
+    connect_cluster(LeaderA, "127.0.0.1", BPort),
+    ?assertEqual(ok, wait_for_connection(LeaderA, "B")),
     rt:wait_until_ring_converged(ANodes),
 
     lager:info("secondary cluster has old version of object three"),
@@ -257,7 +268,7 @@ confirm() ->
     Obj11 = erlcloud_s3:get_object(?TEST_BUCKET, "object_four", U1C2Config),
     ?assertEqual(Object4B, proplists:get_value(content, Obj11)),
 
-    repl_helpers:start_and_wait_until_fullsync_complete(LeaderA),
+    start_and_wait_until_fullsync_complete13(LeaderA),
 
     lager:info("secondary cluster has new version of object three"),
     Obj12 = erlcloud_s3:get_object(?TEST_BUCKET, "object_three", U1C2Config),
@@ -280,4 +291,75 @@ confirm() ->
 
     Obj15 = erlcloud_s3:get_object(?TEST_BUCKET, "object_four", U1C2Config),
     ?assertEqual(Object4A, proplists:get_value(content,Obj15)),
+
     pass.
+
+
+start_and_wait_until_fullsync_complete13(Node) ->
+    Status0 = rpc:call(Node, riak_repl_console, status, [quiet]),
+    Count = proplists:get_value(server_fullsyncs, Status0) + 1,
+    lager:info("waiting for fullsync count to be ~p", [Count]),
+
+    lager:info("Starting fullsync on ~p (~p)", [Node,
+            rtdev:node_version(rtdev:node_id(Node))]),
+    rpc:call(Node, riak_repl_console, fullsync, [["start"]]),
+    %% sleep because of the old bug where stats will crash if you call it too
+    %% soon after starting a fullsync
+    timer:sleep(500),
+
+    Res = rt:wait_until(Node,
+        fun(_) ->
+                Status = rpc:call(Node, riak_repl_console, status, [quiet]),
+                case proplists:get_value(server_fullsyncs, Status) of
+                    C when C >= Count ->
+                        true;
+                    _ ->
+                        false
+                end
+        end),
+    ?assertEqual(ok, Res),
+
+    lager:info("Fullsync on ~p complete", [Node]).
+
+wait_for_connection(Node, Name) ->
+    rt:wait_until(Node,
+        fun(_) ->
+                {ok, Connections} = rpc:call(Node, riak_core_cluster_mgr,
+                    get_connections, []),
+                lists:any(fun({{cluster_by_name, N}, _}) when N == Name -> true;
+                        (_) -> false
+                    end, Connections)
+        end).
+
+wait_until_no_connection(Node) ->
+    rt:wait_until(Node,
+        fun(_) ->
+                Status = rpc:call(Node, riak_repl_console, status, [quiet]),
+                case proplists:get_value(connected_clusters, Status) of
+                    [] ->
+                        true;
+                    _ ->
+                        false
+                end
+        end). %% 40 seconds is enough for repl
+
+connect_cluster(Node, IP, Port) ->
+    Res = rpc:call(Node, riak_repl_console, connect,
+        [[IP, integer_to_list(Port)]]),
+    ?assertEqual(ok, Res).
+
+disconnect_cluster(Node, Name) ->
+    Res = rpc:call(Node, riak_repl_console, disconnect,
+        [[Name]]),
+    ?assertEqual(ok, Res).
+
+
+enable_pg(Node, Cluster) ->
+    Res = rpc:call(Node, riak_repl_console, proxy_get, [["enable", Cluster]]),
+    ?assertEqual(ok, Res).
+
+%disable_pg(Node, Cluster) ->
+%    Res = rpc:call(Node, riak_repl_console, proxy_get, [["disable", Cluster]]),
+%    ?assertEqual(ok, Res).
+
+

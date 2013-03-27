@@ -188,6 +188,7 @@ start_and_wait_until_fullsync_complete(Node) ->
 
     lager:info("Fullsync on ~p complete", [Node]).
 
+
 wait_until_leader(Node) ->
     Res = rt:wait_until(Node,
         fun(_) ->

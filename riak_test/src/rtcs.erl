@@ -66,6 +66,30 @@ setup(NumNodes, Configs) ->
                               rtcs:cs_port(hd(RiakNodes))),
     {AdminConfig, Nodes}.
 
+setup2x2() ->
+    setup2x2(default_configs()).
+
+setup2x2(Configs) ->
+    %% Start the erlcloud app
+    erlcloud:start(),
+
+    %% STFU sasl
+    application:load(sasl),
+    application:set_env(sasl, sasl_error_logger, false),
+
+    Cfgs = configs(Configs),
+     {RiakNodes, _CSNodes, _Stanchion} = Nodes = deploy_nodes(4, Cfgs),
+    rt:wait_until_nodes_ready(RiakNodes),
+    lager:info("Make cluster"),
+    rtcs:make_2x2_clusters(RiakNodes),
+    rt:wait_until_ring_converged(RiakNodes),
+     {AdminKeyId, AdminSecretKey} = setup_admin_user(4, Cfgs),
+     AdminConfig = rtcs:config(AdminKeyId,
+                              AdminSecretKey,
+                              rtcs:cs_port(hd(RiakNodes))),
+    {AdminConfig, Nodes}.
+
+
 configs(CustomConfigs) ->
     [{riak, proplists:get_value(riak, CustomConfigs, ee_config())},
      {cs, proplists:get_value(cs, CustomConfigs, cs_config())},
@@ -245,28 +269,21 @@ deploy_nodes(NumNodes, InitialConfig) ->
 
     Nodes.
 
-
 setup_admin_user(NumNodes, InitialConfig) ->
     lager:info("Initial Config: ~p", [InitialConfig]),
     NodeConfig = [{current, InitialConfig} || _ <- lists:seq(1,NumNodes)],
     RiakNodes = [?DEV(N) || N <- lists:seq(1, NumNodes)],
     CSNodes = [?CSDEV(N) || N <- lists:seq(1, NumNodes)],
     StanchionNode = 'stanchion@127.0.0.1',
-
-    lager:info("RiakNodes: ~p", [RiakNodes]),
-
     NodeMap = orddict:from_list(lists:zip(RiakNodes, lists:seq(1, NumNodes))),
     rt:set_config(rt_nodes, NodeMap),
 
     VersionMap = lists:zip(lists:seq(1, NumNodes), lists:duplicate(NumNodes, ee_current)),
     rt:set_config(rt_versions, VersionMap),
 
-    lager:info("VersionMap: ~p", [VersionMap]),
-
     NL0 = lists:zip(CSNodes, RiakNodes),
     {CS1, R1} = hd(NL0),
     NodeList = [{CS1, R1, StanchionNode} | tl(NL0)],
-    lager:info("NodeList: ~p", [NodeList]),
 
     {_Versions, Configs} = lists:unzip(NodeConfig),
 
@@ -283,7 +300,16 @@ setup_admin_user(NumNodes, InitialConfig) ->
     start_cs_and_stanchion_nodes(NodeList),
     [ok = rt:wait_until_pingable(N) || N <- CSNodes ++ [StanchionNode]],
 
+    lager:info("NodeConfig: ~p", [ NodeConfig ]),
+    lager:info("RiakNodes: ~p", [RiakNodes]),
+    lager:info("CSNodes: ~p", [CSNodes]),
+    lager:info("NodeMap: ~p", [ NodeMap ]),
+    lager:info("VersionMap: ~p", [VersionMap]),
+    lager:info("NodeList: ~p", [NodeList]),
+    lager:info("Nodes: ~p", [Nodes]),
+    lager:info("AdminCreds: ~p", [AdminCreds]),
     lager:info("Deployed nodes: ~p", [Nodes]),
+
     AdminCreds.
 
 
@@ -394,6 +420,14 @@ make_cluster(Nodes) ->
     [join(Node, First) || Node <- Rest],
     ?assertEqual(ok, wait_until_nodes_ready(Nodes)),
     ?assertEqual(ok, wait_until_no_pending_changes(Nodes)).
+
+make_2x2_clusters(Nodes) ->
+    [A,B,C,D] = Nodes,
+    join(B,A),
+    join(D,C),
+    ?assertEqual(ok, wait_until_nodes_ready(Nodes)),
+    ?assertEqual(ok, wait_until_no_pending_changes(Nodes)).
+
 
 start_cs(N) ->
     Cmd = riakcscmd(rt:config(?CS_CURRENT), N, "start"),
