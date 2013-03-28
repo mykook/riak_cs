@@ -6,28 +6,32 @@
 -define(TEST_BUCKET, "riak-test-bucket").
 
 confirm() ->
-    {_, {RiakNodes, _CSNodes, _Stanchion}} =
-        rtcs:deploy_nodes(4, [{riak, rtcs:ee_config()},
-                              {stanchion, rtcs:stanchion_config()},
-                              {cs, rtcs:cs_config()}]),
+%    {_, {RiakNodes, _CSNodes, _Stanchion}} =
+%        rtcs:deploy_nodes(4, [{riak, rtcs:ee_config()},
+%                              {stanchion, rtcs:stanchion_config()},
+%                              {cs, rtcs:cs_config()}]),
+%
+%    rt:wait_until_nodes_ready(RiakNodes),
+%    {ANodes, BNodes} = lists:split(2, RiakNodes),
+%    lager:info("Build cluster A"),
+%    rtcs:make_cluster(ANodes),
+%    lager:info("Build cluster B"),
+%    rtcs:make_cluster(BNodes),
+%    rt:wait_until_ring_converged(ANodes),
+%    rt:wait_until_ring_converged(BNodes),
+%    %% STFU sasl
+%    application:load(sasl),
+%    application:set_env(sasl, sasl_error_logger, false),
+%    erlcloud:start(),
+%    AFirst = hd(ANodes),
+%    BFirst = hd(BNodes),
 
-    rt:wait_until_nodes_ready(RiakNodes),
+    {UserConfig, {RiakNodes, _CSNodes, _Stanchion}} = rtcs:setup2x2(),
+    lager:info("UserConfig = ~p", [UserConfig]),
+    [A,B,C,D] = RiakNodes,
 
-    {ANodes, BNodes} = lists:split(2, RiakNodes),
-
-    lager:info("Build cluster A"),
-    rtcs:make_cluster(ANodes),
-
-    lager:info("Build cluster B"),
-    rtcs:make_cluster(BNodes),
-
-    rt:wait_until_ring_converged(ANodes),
-    rt:wait_until_ring_converged(BNodes),
-
-    %% STFU sasl
-    application:load(sasl),
-    application:set_env(sasl, sasl_error_logger, false),
-    erlcloud:start(),
+    ANodes = [A,B],
+    BNodes = [C,D],
 
     AFirst = hd(ANodes),
     BFirst = hd(BNodes),

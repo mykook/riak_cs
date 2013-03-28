@@ -352,7 +352,6 @@ disconnect_cluster(Node, Name) ->
         [[Name]]),
     ?assertEqual(ok, Res).
 
-
 enable_pg(Node, Cluster) ->
     Res = rpc:call(Node, riak_repl_console, proxy_get, [["enable", Cluster]]),
     ?assertEqual(ok, Res).
