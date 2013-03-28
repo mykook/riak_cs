@@ -1482,10 +1482,11 @@ maybe_get_cluster_id(true, Pid, Timeout) ->
     try
         case riak_repl_pb_api:get_clusterid(Pid, Timeout) of
             {ok, ClusterID} ->
+                lager:info("SETTING CLUSTERID ~p", [ClusterID]),
                 application:set_env(riak_cs, cluster_id, ClusterID),
                 ClusterID;
-            _ ->
-                _ = lager:debug("Unable to obtain cluster ID"),
+             Error ->
+                lager:info("Unable to obtain cluster ID: ~p", [Error]),
                 undefined
         end
     catch _:_ ->

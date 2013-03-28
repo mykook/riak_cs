@@ -175,6 +175,7 @@ handle_cast({get_block, ReplyPid, Bucket, Key, ClusterID, UUID, BlockNumber}, St
     StartTime = os:timestamp(),
     GetOptions = [{r, 1}, {notfound_ok, false}, {basic_quorum, false}],
     LocalClusterID = riak_cs_utils:get_cluster_id(RiakcPid),
+    lager:info("XXX CLUSTERID = ~p", [LocalClusterID]),
     %% don't use proxy get if it's a local get
     %% or proxy get is disabled
     UseProxyGet = ClusterID /= undefined
@@ -183,8 +184,10 @@ handle_cast({get_block, ReplyPid, Bucket, Key, ClusterID, UUID, BlockNumber}, St
     Object =
         case UseProxyGet of
             false ->
+                lager:info("CLUSTERID non-proxy-get"),
                 riakc_pb_socket:get(RiakcPid, FullBucket, FullKey, GetOptions);
             true ->
+                lager:info("CLUSTERID proxy_get"),
                 riak_repl_pb_api:get(RiakcPid, FullBucket, FullKey, ClusterID, GetOptions)
         end,
     ChunkValue = case Object of

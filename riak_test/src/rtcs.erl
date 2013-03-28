@@ -78,6 +78,7 @@ setup2x2(Configs) ->
     application:set_env(sasl, sasl_error_logger, false),
 
     Cfgs = configs(Configs),
+    lager:info("Configs = ~p", [ Cfgs]),
      {RiakNodes, _CSNodes, _Stanchion} = Nodes = deploy_nodes(4, Cfgs),
     rt:wait_until_nodes_ready(RiakNodes),
     lager:info("Make cluster"),
