@@ -39,6 +39,8 @@ list_buckets(User=?RCS_USER{buckets=Buckets}) ->
                           {ok, ?LORESP{}} | {error, term()}.
 list_objects([], _, _, _, _) ->
     {error, no_such_bucket};
+list_objects(_UserBuckets, _Bucket, {error, _}=Error, _Options, _RiakPid) ->
+    Error;
 list_objects(_UserBuckets, Bucket, MaxKeys, Options, RiakPid) ->
     ListKeysRequest = riak_cs_list_objects:new_request(Bucket,
                                                        MaxKeys,
