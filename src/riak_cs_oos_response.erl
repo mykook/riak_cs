@@ -54,7 +54,9 @@ respond({ok, ?LORESP{}=Response}, RD, Ctx) ->
     ResponseBody = [binary_to_list(KeyContent?LOKC.key) ++ "\n" ||
                        KeyContent <- Response?LORESP.contents,
                        KeyContent /= undefined],
-    {ResponseBody, UpdRD, Ctx}.
+    {ResponseBody, UpdRD, Ctx};
+respond({error, _}=Error, RD, Ctx) ->
+    api_error(Error, RD, Ctx).
 
 api_error(Error, RD, Ctx) when is_atom(Error); is_tuple(Error) ->
     error_response(status_code(Error), error_code(Error), error_message(Error),

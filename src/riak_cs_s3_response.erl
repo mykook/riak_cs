@@ -159,7 +159,9 @@ status_code(_) -> 503.
 respond(?LBRESP{}=Response, RD, Ctx) ->
     {riak_cs_xml:to_xml(Response), RD, Ctx};
 respond({ok, ?LORESP{}=Response}, RD, Ctx) ->
-    {riak_cs_xml:to_xml(Response), RD, Ctx}.
+    {riak_cs_xml:to_xml(Response), RD, Ctx};
+respond({error, _}=Error, RD, Ctx) ->
+    api_error(Error, RD, Ctx).
 
 respond(StatusCode, Body, ReqData, Ctx) ->
      UpdReqData = wrq:set_resp_body(Body,
@@ -168,9 +170,14 @@ respond(StatusCode, Body, ReqData, Ctx) ->
                                                         ReqData)),
     {{halt, StatusCode}, UpdReqData, Ctx}.
 
-api_error(Error, ReqData, Ctx) when is_atom(Error); is_tuple(Error) ->
-    error_response(status_code(Error), error_code(Error), error_message(Error),
-                   ReqData, Ctx).
+api_error(Error, RD, Ctx) when is_atom(Error) ->
+    error_response(status_code(Error),
+                   error_code(Error),
+                   error_message(Error),
+                   RD,
+                   Ctx);
+api_error({error, Reason}, RD, Ctx) ->
+    api_error(Reason, RD, Ctx).
 
 error_response(ErrorDoc) when length(ErrorDoc) =:= 0 ->
     {error, error_code_to_atom("BadRequest")};
