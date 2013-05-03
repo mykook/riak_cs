@@ -51,7 +51,8 @@ authorize(RD, Ctx) ->
 
 -spec api_request(#wm_reqdata{}, #context{}) -> {ok, ?LORESP{}} | {error, term()}.
 api_request(RD, Ctx=#context{bucket=Bucket,
-                               user=User}) ->
+                             user=User,
+                             start_time=StartTime}) ->
     UserName = riak_cs_wm_utils:extract_name(User),
     riak_cs_dtrace:dt_bucket_entry(?MODULE, <<"list_keys">>, [], [UserName, Bucket]),
     Res = riak_cs_api:list_objects(
@@ -61,6 +62,7 @@ api_request(RD, Ctx=#context{bucket=Bucket,
             get_max_keys(RD),
             get_options(RD),
             Ctx#context.riakc_pid),
+    ok = riak_cs_stats:update_with_start(bucket_list_keys, StartTime),
     riak_cs_dtrace:dt_bucket_return(?MODULE, <<"list_keys">>, [200], [UserName, Bucket]),
     Res.
 

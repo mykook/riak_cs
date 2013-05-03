@@ -34,10 +34,12 @@ allowed_methods() ->
     ['GET'].
 
 -spec api_request(#wm_reqdata{}, #context{}) -> ?LBRESP{}.
-api_request(_RD, #context{user=User}) ->
+api_request(_RD, #context{user=User,
+                          start_time=StartTime}) ->
     UserName = riak_cs_wm_utils:extract_name(User),
     riak_cs_dtrace:dt_service_entry(?MODULE, <<"service_get_buckets">>, [], [UserName]),
     Res = riak_cs_api:list_buckets(User),
+    ok = riak_cs_stats:update_with_start(service_get_buckets, StartTime),
     riak_cs_dtrace:dt_service_return(?MODULE, <<"service_get_buckets">>, [], [UserName]),
     Res.
 
