@@ -31,7 +31,7 @@
 -include_lib("webmachine/include/webmachine.hrl").
 
 -spec respond(term(), #wm_reqdata{}, #context{}) ->
-                     {string(), #wm_reqdata{}, #context{}}.
+                     {string() | {halt, non_neg_integer()} , #wm_reqdata{}, #context{}}.
 respond(?LBRESP{}=Response, RD, Ctx) ->
     BucketsDoc =
         [begin
@@ -60,7 +60,12 @@ respond({error, _}=Error, RD, Ctx) ->
 
 api_error(Error, RD, Ctx) when is_atom(Error); is_tuple(Error) ->
     error_response(status_code(Error), error_code(Error), error_message(Error),
-                   RD, Ctx).
+                   RD, Ctx);
+api_error({riak_connect_failed, _}=Error, RD, Ctx) ->
+    error_response(status_code(Error), error_code(Error), error_message(Error),
+                   RD, Ctx);
+api_error({error, Reason}, RD, Ctx) ->
+    api_error(Reason, RD, Ctx).
 
 error_response(StatusCode, _Code, _Message, RD, Ctx) ->
     {{halt, StatusCode}, RD, Ctx}.

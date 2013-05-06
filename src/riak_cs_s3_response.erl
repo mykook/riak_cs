@@ -176,6 +176,12 @@ api_error(Error, RD, Ctx) when is_atom(Error) ->
                    error_message(Error),
                    RD,
                    Ctx);
+api_error({riak_connect_failed, _}=Error, RD, Ctx) ->
+    error_response(status_code(Error),
+                   error_code(Error),
+                   error_message(Error),
+                   RD,
+                   Ctx);
 api_error({error, Reason}, RD, Ctx) ->
     api_error(Reason, RD, Ctx).
 
